@@ -12,7 +12,7 @@ progname = os.path.basename(sys.argv[0])
 def printUsage(msg):
     if not msg == '':
         print msg
-    print "usage: %s [options] user password [command]" % (progname)
+    print "usage: %s [options] user password" % (progname)
     print "options:"
     print
     print "  -t <troop> troup name"
