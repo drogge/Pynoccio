@@ -1,0 +1,64 @@
+#!/usr/bin/python
+
+import os
+import sys
+import time
+import getopt
+
+import pynoccio
+
+progname = os.path.basename(sys.argv[0])
+
+def printUsage(msg):
+    if not msg == '':
+        print msg
+    print "usage: %s [options] user password command command ..." % (progname)
+    print "options:"
+    print
+    print "  -t <troop> troup name"
+    print "  -s <scout> scout name"
+
+def main():
+    try:
+        options, argv = getopt.getopt(sys.argv[1:], "t:s:")
+    except getopt.GetoptError:
+        printUsage('Error parsing arguments')
+        sys.exit(1)
+
+    if len(argv) < 2:
+        printUsage("")
+        sys.exit(1)
+
+    troop_name = "Rancho de la Basura Blanca"
+    scout_name = "Billy"
+
+    for o,a in options:
+        if o == "-t":
+            troop_name = a
+        elif o == "-s":
+            scout_name = a
+            ghostbusted = True
+        else:
+            printUsage("Unrecognised option - \"%s\"" % (o))
+            sys.exit(1)
+
+    a = pynoccio.Account(argv[0], argv[1])
+
+    for t in a.troops:
+        print "troop:", t
+        for s in t.scouts:
+            print "\tscout:", s
+
+    scout = a.troop(troop_name).scout(scout_name)
+
+    print >>sys.stderr, 'talking to scout named', scout.name
+    for cmd in argv[2:]:
+	exec 'print >>sys.stderr, scout.'+cmd+".reply"
+
+if __name__ == '__main__':
+    try:
+        main()
+    except KeyboardInterrupt:
+        sys.exit(0)
+
+

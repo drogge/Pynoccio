@@ -1,0 +1,133 @@
+#!/usr/bin/python
+
+import os
+import sys
+import time
+import getopt
+
+import pynoccio
+
+progname = os.path.basename(sys.argv[0])
+
+def printUsage(msg):
+    if not msg == '':
+        print msg
+    print "usage: %s [options] user password [command]" % (progname)
+    print "options:"
+    print
+    print "  -t <troop> troup name"
+    print "  -s <scout> scout name"
+
+def main():
+    try:
+        options, argv = getopt.getopt(sys.argv[1:], "t:s:")
+    except getopt.GetoptError:
+        printUsage('Error parsing arguments')
+        sys.exit(1)
+
+    if len(argv) < 2:
+        printUsage("")
+        sys.exit(1)
+
+    troop_name = "Rancho de la Basura Blanca"
+    scout_name = "Billy"
+
+    for o,a in options:
+        if o == "-t":
+            troop_name = a
+        elif o == "-s":
+            scout_name = a
+        else:
+            printUsage("Unrecognised option - \"%s\"" % (o))
+            sys.exit(1)
+
+    pynoccio.set_debug(1)
+    a = pynoccio.Account(argv[0], argv[1])
+    #print "account:", a.account, a.token
+    #print a.account()
+
+    for t in a.troops:
+        print "troop:", t
+        for s in t.scouts:
+            print "\tscout:", s
+
+    scout = a.troop(troop_name).scout(scout_name)
+
+    print >>sys.stderr, 'talking to scout named', scout.name
+    if 1:
+        print >>sys.stderr, scout.power.ischarging.reply
+        print >>sys.stderr, scout.power.percent.reply
+        print >>sys.stderr, scout.power.voltage.reply
+        #print >>sys.stderr, scout.power.disablevcc.reply
+        print >>sys.stderr, scout.power.enablevcc.reply
+        #print >>sys.stderr, scout.power.sleep(1000).reply
+        #time.sleep(1)
+        print >>sys.stderr, scout.power.report.reply
+    if 1:
+        #print >>sys.stderr, scout.mesh.config(scoutId, troopId, channel=20)
+        #print >>sys.stderr, scout.mesh.setpower(1).reply
+        #print >>sys.stderr, scout.mesh.setdatarate(0).reply
+        #print >>sys.stderr, scout.mesh.key("TestSecurityKey1").reply
+        #print >>sys.stderr, scout.mesh.resetkey.reply
+        #print >>sys.stderr, scout.mesh.joingroup(10).reply
+        print >>sys.stderr, scout.mesh.ingroup(6).reply
+        #print >>sys.stderr, scout.mesh.leavegroup(10).reply
+        print >>sys.stderr, scout.mesh.send(1, "hello").reply
+        print >>sys.stderr, scout.mesh.report.reply
+        print >>sys.stderr, scout.mesh.routing.reply
+        print >>sys.stderr, scout.mesh.announce(1, "hi").reply
+        print >>sys.stderr, scout.mesh.signal.reply
+    if 1: # misc
+        print >>sys.stderr, scout.misc.temperature.reply
+        print >>sys.stderr, scout.misc.randomnumber.reply
+        print >>sys.stderr, scout.misc.uptime.reply
+    if 1: # led
+        print >>sys.stderr, scout.led.blink(0, 255, 255).reply
+        print >>sys.stderr, scout.led.off.reply
+	for color in ['red', 'green', 'blue', 'cyan', 'purple',
+		      'magenta', 'yellow', 'white']:
+	    print >>sys.stderr, scout.led.display(color).reply
+        print >>sys.stderr, scout.led.sethex("00FF00").reply
+        print >>sys.stderr, scout.led.setrgb(0, 0, 255).reply
+        print >>sys.stderr, scout.led.savetorch(255, 255, 0).reply
+        print >>sys.stderr, scout.led.report.reply
+    if 1: # pin
+        print >>sys.stderr, scout.pin.makeinput("d2").reply
+        print >>sys.stderr, scout.pin.makeinputup("d2").reply
+        print >>sys.stderr, scout.pin.makeoutput("d2").reply
+        print >>sys.stderr, scout.pin.disable("d2").reply
+        print >>sys.stderr, scout.pin.setmode("d2", "INPUT_PULLUP").reply
+        print >>sys.stderr, scout.pin.read("d2").reply
+        print >>sys.stderr, scout.pin.write("d2", "HIGH").reply
+        print >>sys.stderr, scout.pin.setmode("a2", "OUTPUT").reply
+        print >>sys.stderr, scout.pin.write("a2", 500).reply
+        print >>sys.stderr, scout.pin.report.digital.reply
+        print >>sys.stderr, scout.pin.report.analog.reply
+    if 1: # scout
+        print >>sys.stderr, scout.scout.report.reply
+        print >>sys.stderr, scout.scout.isleadscout.reply
+        print >>sys.stderr, scout.scout.delay(1000).reply
+        #print >>sys.stderr, scout.scout.daisy.reply
+        #print >>sys.stderr, scout.scout.boot.reply
+    if 1: # hq
+        #print >>sys.stderr, scout.hq.settoken("hqtoken").reply
+        print >>sys.stderr, scout.hq.gettoken.reply
+    if 1: # events
+        print >>sys.stderr, scout.events.stop.reply
+        print >>sys.stderr, scout.events.start.reply
+        print >>sys.stderr, scout.events.setcycle(100, 1000, 60000).reply
+    if 1: # wifi - Lead scout only
+	if scout.scout.isleadscout.reply:
+	    print >>sys.stderr, scout.wifi.report.reply
+	    print >>sys.stderr, scout.wifi.status.reply
+	    print >>sys.stderr, scout.wifi.list.reply
+	    print >>sys.stderr, scout.wifi.gettime.reply
+
+if __name__ == '__main__':
+    try:
+        main()
+    except KeyboardInterrupt:
+        sys.exit(0)
+
+
+
