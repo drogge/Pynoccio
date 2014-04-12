@@ -15,11 +15,12 @@ def printUsage(msg):
     print
     print "  -t <troop> troup name"
     print "  -s <scout> scout name "
+    print "  -v level   set pynoccio debug level"
 
 def main():
     import getopt
     try:
-        options, argv = getopt.getopt(sys.argv[1:], "t:s:")
+        options, argv = getopt.getopt(sys.argv[1:], "t:s:v:")
     except getopt.GetoptError:
         printUsage('Error parsing arguments')
         sys.exit(1)
@@ -31,16 +32,21 @@ def main():
     troop_name = "Rancho de la Basura Blanca"
     scout_name = "Billy"
 
+    debug_level = None
+
     for o,a in options:
         if o == "-t":
             troop_name = a
         elif o == "-s":
             scout_name = a
-            ghostbusted = True
+        elif o == "-v":
+            debug_level = int(a)
         else:
             printUsage("Unrecognised option - \"%s\"" % (o))
             sys.exit(1)
 
+    if debug_level is not None:
+	pynoccio.set_debug(debug_level)
     a = pynoccio.Account(argv[0], argv[1])
 
     for t in a.troops:

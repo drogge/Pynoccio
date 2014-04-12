@@ -5,11 +5,25 @@ import json
 
 _api_url = 'https://api.pinocc.io/v1/'
 
+_account = None # Don't like this but we want to be able look up troop and
+		# scout stuff
+
 """ Set debug level """
 _pinoccio_debug = 0
 def set_debug(v):
     global _pinoccio_debug
     _pinoccio_debug = v
+
+verbose_ids = True
+def set_verbose_ids(vids):
+    verbose_ids = vids
+
+def scout_name(tid, sid):
+    if not verbose_ids:
+    	return "%d-%d" % (tid, sid)
+    t = _account.troop(tid)
+    s_name = t.scout(sid).name
+    return s_name
 
 def print_dict(d):
     for k in d.keys():
@@ -57,16 +71,23 @@ class SSreply(object):
         super(SSreply, self).__init__()
         self.raw = d
 	self.error = False
-	self.type = str(self.raw['type'])
-	self.id = str(self.raw['id'])
-	self.scout = int(self.raw['from'])
-	self.commandsPending = int(self.raw['commandsPending'])
-	self.basetime = self.raw['basetime']
-	self.reply = self.raw['reply']
-	self.tid = self.raw['tid']
-	self._cid = self.raw['_cid']
-	self.messagesQueued = self.raw['messagesQueued']
-	self.end = self.raw['end']
+	try:
+	    self.type = str(self.raw['type'])
+	    self.id = str(self.raw['id'])
+	    self.scout = int(self.raw['from'])
+	    self.commandsPending = int(self.raw['commandsPending'])
+	    self.basetime = self.raw['basetime']
+	    self.reply = self.raw['reply']
+	    self.tid = self.raw['tid']
+	    self._cid = self.raw['_cid']
+	    self.messagesQueued = self.raw['messagesQueued']
+	except KeyError:
+	    print >>sys.stderr, 'invalid SS reply: "%s"' % str(d)
+	    raise
+	try:
+	    self.end = self.raw['end']
+	except:
+	    pass
 
         # for some reason replies have \r\n in them. remove it now
         r = self.reply.replace('\r', '').strip()
@@ -122,15 +143,20 @@ class SSerror(SSreply):
          u'timeout': 10000,
          u'command': u'power.ischargingp',
         """
+	if _pinoccio_debug > 1:
+	    print self.raw
         self.status_code = status_code
 	self.error = True
-	self.err = str(self.raw['err'])
-	self.command = str(self.raw['command'])
-	self.timeerror = self.raw.get('timeerror', False)
-	if self.timeerror:
-	    self.timeout = self.raw['timeout']
-	else:
-	    self.timeout = -1
+	try:
+	    self.err = str(self.raw['err'])
+	    self.command = str(self.raw['command'])
+	    self.timeerror = self.raw.get('timeerror', False)
+	    if self.timeerror:
+		self.timeout = self.raw['timeout']
+	    else:
+		self.timeout = -1
+	except KeyError:
+	    print >>sys.stderr, 'invalid SS reply: "%s"' % str(d)
 
     def __str__(self):
         s =  'id: '+str(self.id)
@@ -151,6 +177,17 @@ class SSerror(SSreply):
         else:
             s += '"""\n'+str(self.reply)+'\n"""'
         return s
+
+class announcement:
+    """ {u'type': u'announce',
+         u'report': [1, u'hello'],
+         } """
+    def __init__(self, d):
+	self.group = int(d['report'][0])
+    	self.message = str(d['report'][1])
+
+    def __str__(self):
+    	return 'group: %d, message: %s' % (self.group, self.message)
 
 class availabilityState:
     """ {u'type': u'available',
@@ -202,10 +239,10 @@ class meshState:
          u'routes': 0,
          u'channel': 20}"""
     def __init__(self, d):
-	self.scoutid = d["scoutid"]
-	self.troopid = d["troopid"]
+	self.scoutid = int(d["scoutid"])
+	self.troopid = int(d["troopid"])
 	self.routes = d["routes"]
-	self.channel = d["channel"]
+	self.channel = int(d["channel"])
 	self.rate = str(d["rate"])
 	self.power = str(d["power"])
 
@@ -299,6 +336,17 @@ class scoutState:
 	s += ', build: '+str(self.build)
 	return s
 
+class freeState:
+    def __init__(self, s):
+	"""0790 17261 17096 : used/free/large"""
+	vs = s.split()
+	self.used = int(vs[0])
+	self.free = int(vs[1])
+	self.large = int(vs[2])
+
+    def __str__(self):
+	return "used: %d free: %d large: %d" % (self.used, self.free, self.large)
+
 class tempState:
     """ {u'type': u'temp',
          u'current': 26,
@@ -331,16 +379,13 @@ class uptimeState:
 
 class wifiState:
     def __init__(self, d):
-	self.version = d['version']
 	self.connected = d['connected']
 	self.hq = d['hq']
 
     def __str__(self):
-	s = 'version: '+str(self.version)
-	s += ', connected: '+str(self.connected)
+	s = 'connected: '+str(self.connected)
 	s += ', hq: '+str(self.hq)
 	return s
-
 
 """
 Class for converting output of stats and sync commands from json
@@ -351,9 +396,9 @@ class State(object):
         super(State, self).__init__()
         self.raw = d
         self.type = str(d['type'])
-        self.troop = d.get('troop', 0)
-	self.scout = d.get('scout', 0)
-        self.time = d.get('time', 0)
+        self.troop = int(d.get('troop', 0))
+	self.scout = int(d.get('scout', 0))
+        self.time = int(d.get('time', 0))
         self.value = d.get('value', {})
 	self.valid = True
 
@@ -379,18 +424,22 @@ class State(object):
             self.state_data = nameState(self.value)
 	elif self.type == 'available':
             self.state_data = availabilityState(self.value)
+	elif self.type == 'announce':
+            self.state_data = announcement(self.value)
+	elif self.type == 'wifi':
+	    self.state_data = wifiState(self.value)
 	elif self.type in ['data', 'token']:
 	    self.valid = False
         else:
 	    print d
             raise Exception
-
+ 
     def __str__(self):
         s = 'type: '+self.type
 	if self.type in ['connection', 'name']:
 	    s += ', troop: '+str(self.troop)
 	else:
-	    s += ', scout: '+str(self.troop)+'-'+str(self.scout)
+	    s += ', scout: '+scout_name(self.troop, self.scout)
 	if self.type != 'name':	# for some reason the name state doesn't get a time stamp
 	    s +=', time: '+_time_str(self.time)
 	s += ', '+str(self.state_data)
@@ -410,26 +459,26 @@ class PowerCmd(SSCmd):
 
     @property
     def ischarging(self):
-        return self.run('power.ischarging')
+        return self.run('print power.ischarging')
 
     @property
     def percent(self):
-        return self.run('power.percent')
+        return self.run('print power.percent')
 
     @property
     def voltage(self):
-        return self.run('power.voltage')
+        return self.run('print power.voltage')
 
     @property
     def enablevcc(self):
-        return self.run('power.enablevcc')
+        return self.run('print power.enablevcc')
 
     @property
     def disablevcc(self):
-        return self.run('power.disablevcc')
+        return self.run('print power.disablevcc')
 
     def sleep(self, millis):
-        return self.run('power.sleep(%d)' % (millis))
+        return self.run('print power.sleep(%d)' % (millis))
 
     @property
     def report(self):
@@ -444,32 +493,39 @@ class MeshCmd(SSCmd):
         super(MeshCmd, self).__init__(scout)
 
     def config(self, scoutId, troopId, channel=20):
-        return self.run('mesh.config(%d, %d, %d)' % (scoutId, troopId, channel))
+        return self.run('print mesh.config(%d, %d, %d)' % (scoutId, troopId, channel))
 
     def setpower(self, powerLevel):
-        return self.run('mesh.setpower(%d)' % (powerLevel))
+        return self.run('print mesh.setpower(%d)' % (powerLevel))
 
     def setdatarate(self, dataRate):
-        return self.run('mesh.setdatarate(%d)' % (dataRate))
+        return self.run('print mesh.setdatarate(%d)' % (dataRate))
+
+    @property
+    def getkey(self):
+        return self.run('print mesh.getkey')
 
     def key(self, key):
-        return self.run('mesh.key("%s")' % (key))
+        return self.run('print mesh.key("%s")' % (key))
 
     @property
     def resetkey(self):
-        return self.run('mesh.resetkey')
+        return self.run('print mesh.resetkey')
 
     def joingroup(self, group):
-        return self.run('mesh.joingroup(%d)' % (group))
+        return self.run('print mesh.joingroup(%d)' % (group))
 
     def leavegroup(self, group):
-        return self.run('mesh.leavegroup(%d)' % (group))
+        return self.run('print mesh.leavegroup(%d)' % (group))
 
     def ingroup(self, group):
-        return self.run('mesh.ingroup(%d)' % (group))
+        return self.run('print mesh.ingroup(%d)' % (group))
 
     def send(self, scoutId, message):
-        return self.run('mesh.send(%d, "%s")' % (scoutId, message))
+        return self.run('print mesh.send(%d, "%s")' % (scoutId, message))
+
+    def verbose(self, v):
+    	return self.run('print mesh.verbose(%d)' % v)
 
     @property
     def report(self):
@@ -481,14 +537,18 @@ class MeshCmd(SSCmd):
 
     @property
     def routing(self):
-        return self.run('mesh.routing')
+        return self.run('print mesh.routing')
 
     def announce(self, groupId, message):
-        return self.run('mesh.announce(%d, "%s")' % (groupId, message))
+        return self.run('print mesh.announce(%d, "%s")' % (groupId, message))
 
     @property
     def signal(self):
-        return self.run('mesh.signal')
+        return self.run('print mesh.signal')
+
+    @property
+    def loss(self):
+        return self.run('print mesh.loss')
 
 class MiscCmd(SSCmd):
     def __init__(self, scout):
@@ -496,29 +556,40 @@ class MiscCmd(SSCmd):
 
     @property
     def temperature(self):
-        return self.run('temperature')
+        return self.run('print temperature')
 
     @property
     def randomnumber(self):
-        return self.run('randomnumber')
+        return self.run('print randomnumber')
+
+    @property
+    def lastreset(self):
+        return self.run('lastreset')
 
     @property
     def uptime(self):
         return self.run('uptime')
+
+    @property
+    def report(self):
+        return self.run('report')
+
+    def verbose(self, v):
+    	return self.run('print verbose(%d)' % v)
 
 class LedCmd(SSCmd):
     def __init__(self, scout):
         super(LedCmd, self).__init__(scout)
 
     def blink(self, r, g, b, ms=500):
-        return self.run('led.blink(%d, %d, %d, %d)' % (r, g, b, ms))
+        return self.run('print led.blink(%d, %d, %d, %d)' % (r, g, b, ms))
 
     @property
     def off(self):
-        return self.run('led.off')
+        return self.run('print led.off')
 
     def display(self, color, ms=None, cont=None):
-	cmd = 'led.'+color
+	cmd = 'print led.'+color
 	if ms is not None:
 	    cmd += '(%d' % ms
 	    if cont is not None:
@@ -526,14 +597,34 @@ class LedCmd(SSCmd):
 	    cmd += ')'
         return self.run(cmd)
 
+    def torch(self, ms=None, cont=None):
+	cmd = 'print led.torch'
+	if ms is not None:
+	    cmd += '(%d' % ms
+	    if cont is not None:
+		cmd += ',%d' % cont
+	    cmd += ')'
+        return self.run(cmd)
+
+    def on(self, ms=None, cont=None):
+	return self.torch(ms, cont)
+
     def sethex(self, hexval):
-        return self.run('led.sethex("%s")' % (hexval))
+        return self.run('print led.sethex("%s")' % (hexval))
+
+    @property
+    def gethex(self):
+        return self.run('print led.gethex')
 
     def setrgb(self, r, g, b):
-        return self.run('led.setrgb(%d, %d, %d)' % (r, g, b))
+        return self.run('print led.setrgb(%d, %d, %d)' % (r, g, b))
+
+    @property
+    def isoff(self):
+    	return self.run('print led.isoff')
 
     def savetorch(self, r, g, b):
-        return self.run('led.savetorch(%d, %d, %d)' % (r, g, b))
+        return self.run('print led.savetorch(%d, %d, %d)' % (r, g, b))
 
     @property
     def report(self):
@@ -573,28 +664,62 @@ class PinCmd(SSCmd):
 
     # Pin commands
     def makeinput(self, pin):
-        return self.run('pin.makeinput("%s")' % pin)
+        return self.run('print pin.makeinput("%s")' % pin)
 
     def makeinputup(self, pin):
-        return self.run('pin.makeinputup("%s")' % pin)
+        return self.run('print pin.makeinputup("%s")' % pin)
 
     def makeoutput(self, pin):
-        return self.run('pin.makeoutput("%s")' % pin)
+        return self.run('print pin.makeoutput("%s")' % pin)
 
     def disable(self, pin):
-        return self.run('pin.disable("%s")' % pin)
+        return self.run('print pin.disable("%s")' % pin)
 
     def setmode(self, pin, mode):
-        return self.run('pin.setmode("%s", %s)' % (pin, mode))
+        return self.run('print pin.setmode("%s", %s)' % (pin, mode))
 
     def read(self, pin):
-        return self.run('pin.read("%s")' % pin)
+        return self.run('print pin.read("%s")' % pin)
 
     def write(self, pin, value):
-        return self.run('pin.makeinput("%s", %s)' % (pin, value))
+        return self.run('print pin.makeinput("%s", %s)' % (pin, value))
+
+    def save(self, pin, mode, value=None):
+	cmd = 'pin.save("%s", %s' % (pin, mode)
+	if value is not None:
+	    cmd += ', %s' % value
+	cmd += ')'
+        return self.run(cmd)
 
     def report(self):
         return self.report
+
+class BackpackCmd(SSCmd):
+    def __init__(self, scout):
+        super(BackpackCmd, self).__init__(scout)
+
+    @property
+    def report(self):
+        res = self.run('backpack.report')
+	print res
+        # convert json string reply to led report object
+	#if not res.error:
+	#    res.reply = ledState(make_json(res.reply))
+	return res
+
+    @property
+    def list(self):
+        return self.run('backpack.list')
+
+    def eeprom(self, bpid):
+	return self.run('backpack.eeprom(%d)' % bpid)
+
+    #print >>sys.stderr, scout.backpack.eeprom.update.reply
+    def detail(self, bpid):
+	return self.run('print backpack.detail(%d)' % bpid)
+
+    def resources(self, bpid):
+	return self.run('print backpack.resources(%d)' % bpid)
 
 class ScoutCmd(SSCmd):
     def __init__(self, scout):
@@ -610,18 +735,30 @@ class ScoutCmd(SSCmd):
 
     @property
     def isleadscout(self):
-        return self.run('scout.isleadscout');
+        return self.run('print scout.isleadscout')
 
     def delay(self, ms):
-        return self.run('scout.delay(%d)' % ms)
+        return self.run('print scout.delay(%d)' % ms)
+
+    @property
+    def free(self):
+	res = self.run('scout.free')
+	# convert string reply to free state object
+	if not res.error:
+	    res.reply = freeState(res.reply)
+	return res
 
     @property
     def daisy(self):
-        return self.run('scout.daisy');
+        return self.run('print scout.daisy');
 
     @property
     def boot(self):
-        return self.run('scout.boot');
+        return self.run('print scout.boot');
+
+    @property
+    def otaboot(self):
+        return self.run('print scout.otaboot');
 
 class HQCmd(SSCmd):
     def __init__(self, scout):
@@ -629,11 +766,17 @@ class HQCmd(SSCmd):
 
     # HQ commands
     def settoken(self, token):
-    	return self.run('hq.gettoken("%s") % token')
+    	return self.run('print hq.settoken("%s") % token')
 
     @property
     def gettoken(self):
     	return self.run('hq.gettoken')
+
+    def verbose(self, v):
+    	return self.run('print hq.verbose(%d)' % v)
+
+    def _print(self, msg):
+    	return self.run('print hq.print("%s")' % msg)
 
 class EventsCmd(SSCmd):
     def __init__(self, scout):
@@ -642,15 +785,34 @@ class EventsCmd(SSCmd):
     # Event commands
     @property
     def start(self):
-    	return self.run('events.start')
+    	return self.run('print events.start')
 
     @property
     def stop(self):
-    	return self.run('events.stop')
+    	return self.run('print events.stop')
 
     def setcycle(self, digitalMs, analogMs, peripheralMs):
-    	return self.run('events.setcycle(%d, %d, %d)' %
+    	return self.run('print events.setcycle(%d, %d, %d)' %
 			(digitalMs, analogMs, peripheralMs))
+
+    def verbose(self, v):
+    	return self.run('print hq.verbose(%d)' % v)
+
+class KeyCmd(SSCmd):
+    def __init__(self, scout):
+        super(KeyCmd, self).__init__(scout)
+
+    def key(self, key):
+	return self.run('print key("%s")' % key)
+
+    def _print(self, id):
+	return self.run('print key.print(%d)' % id)
+
+    def number(self, id):
+	return self.run('print key.number(%d)' % id)
+
+    def save(self, key, v):
+	return self.run('print key.save(:"%s", %d)' % (key, v))
 
 class WifiCmd(SSCmd):
     def __init__(self, scout):
@@ -667,33 +829,38 @@ class WifiCmd(SSCmd):
 	return res
 
     @property
-    def status(self):
-    	return self.run('wifi.status')
-
-    @property
     def list(self):
     	return self.run('wifi.list')
 
     @property
     def dhcp(self, host):
-    	return self.run('wifi.dhcp("%s")' % host)
+    	return self.run('print wifi.dhcp("%s")' % host)
 
     @property
     def static(self, ip, netmask, gateway, dns):
-    	return self.run('wifi.static("%s", "%s", "%s", "%s")' %
+    	return self.run('print wifi.static("%s", "%s", "%s", "%s")' %
 		   (ip, netmask, gateway, dns))
 
     @property
     def reassociate(self):
-    	return self.run('wifi.reassociate')
+    	return self.run('print wifi.reassociate')
 
     @property
     def command(self, command):
-    	return self.run('wifi.command("%s")' % command)
+    	return self.run('print wifi.command("%s")' % command)
 
     @property
     def gettime(self):
     	return self.run('wifi.gettime')
+
+    def verbose(self, v):
+    	return self.run('print wifi.verbose(%d)' % v)
+
+    def stats(self, stype):
+    	return self.status(stype)
+
+    def status(self, stype):
+    	return self.run('wifi.status(%d)' % stype)
 
 class Scout(object):
     def __init__(self, parent, troop, id, time, updated, name):
@@ -710,9 +877,11 @@ class Scout(object):
         self._miscCmd = MiscCmd(self)
         self._ledCmd = LedCmd(self)
         self._pinCmd = PinCmd(self)
+        self._backpackCmd = BackpackCmd(self)
 	self._scoutCmd = ScoutCmd(self)
 	self._hqCmd = HQCmd(self)
 	self._eventsCmd = EventsCmd(self)
+	self._keyCmd = KeyCmd(self)
 	self._wifiCmd = WifiCmd(self)
 
     @property
@@ -736,6 +905,10 @@ class Scout(object):
         return self._pinCmd
 
     @property
+    def backpack(self):
+        return self._backpackCmd
+
+    @property
     def scout(self):
     	return self._scoutCmd
 
@@ -746,6 +919,10 @@ class Scout(object):
     @property
     def events(self):
     	return self._eventsCmd
+
+    @property
+    def key(self):
+    	return self._keyCmd
 
     @property
     def wifi(self):
@@ -761,6 +938,10 @@ class Scout(object):
                 print >>sys.stderr, r.text
             return SSreply(r.json()['data'])
 	return SSerror(r.status_code, r.json()['data'])
+
+    @property
+    def banner(self):
+        return self.run('banner');
 
     def stats(self, report):
         r = requests.get(_api_url+'stats',
@@ -821,6 +1002,8 @@ class Troop(object):
 class Account(object):
     def __init__(self, user=None, password=None, no_load=False):
         object.__init__(self)
+	global _account
+	_account = self
         self.account = None
         self.token = None
         self.troops = []
@@ -872,6 +1055,8 @@ class Account(object):
         if r.status_code == 200:
             for chunk in r.iter_content(1):
                 if chunk[0] == '\n':
+		    if _pinoccio_debug > 1:
+		    	print >>sys.stderr, buf
                     state = State(json.loads(buf)['data'])
 		    if state.valid:
                         yield(state)
